@@ -1,37 +1,40 @@
 import os
-import asyncio
 import logging
-
 from dotenv import load_dotenv
+from aiohttp import web
 from aiogram import Bot, Dispatcher, Router, types, F
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.client.default import DefaultBotProperties
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 # ---------------------------
-# Env & logging
+# ENV & LOGGING
 # ---------------------------
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 log = logging.getLogger("canva_pro_bot")
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # <-- from env
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "@kashsh00")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # e.g. https://your-render-app.onrender.com/webhook
 
 if not BOT_TOKEN:
-    raise RuntimeError("Missing BOT_TOKEN. Put it in .env or your hosting env.")
+    raise RuntimeError("Missing BOT_TOKEN in environment variables.")
+if not WEBHOOK_URL:
+    raise RuntimeError("Missing WEBHOOK_URL (e.g. https://your-app.onrender.com/webhook).")
 
 bot = Bot(
     token=BOT_TOKEN,
     default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN),
 )
 dp = Dispatcher()
-router = Router()  # <-- use Router for decorators
+router = Router()
 
 # ---------------------------
-# Commands setup
+# BOT COMMANDS
 # ---------------------------
 async def set_bot_commands(b: Bot):
     commands = [
@@ -45,7 +48,7 @@ async def set_bot_commands(b: Bot):
     await b.set_my_commands(commands)
 
 # ---------------------------
-# Keyboards
+# KEYBOARDS
 # ---------------------------
 def main_menu() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
@@ -69,7 +72,7 @@ def back_button() -> InlineKeyboardMarkup:
     )
 
 # ---------------------------
-# Handlers (Router decorators)
+# HANDLERS (same content)
 # ---------------------------
 @router.message(Command("start"))
 async def start_command(message: types.Message):
@@ -215,21 +218,25 @@ async def handle_buttons(callback: types.CallbackQuery):
     await callback.answer()
 
 # ---------------------------
-# Lifecycle & run
+# WEBHOOK SETUP
 # ---------------------------
-@dp.startup()
-async def on_startup():
-    log.info("Setting bot commands…")
+async def on_startup(app):
+    log.info("Setting webhook and commands…")
+    await bot.set_webhook(WEBHOOK_URL)
     await set_bot_commands(bot)
-    log.info("Bot started.")
+    log.info(f"Webhook set to {WEBHOOK_URL}")
 
-@dp.shutdown()
-async def on_shutdown():
-    log.info("Bot shutting down…")
+async def on_shutdown(app):
+    log.info("Removing webhook…")
+    await bot.delete_webhook()
+    log.info("Bot shut down cleanly.")
 
-async def main():
-    dp.include_router(router)
-    await dp.start_polling(bot)
+app = web.Application()
+dp.include_router(router)
+SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path="/webhook")
+setup_application(app, dp, bot=bot)
+app.on_startup.append(on_startup)
+app.on_shutdown.append(on_shutdown)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    web.run_app(app, host="0.0.0.0", port=int(os.getenv("PORT", 8080)))

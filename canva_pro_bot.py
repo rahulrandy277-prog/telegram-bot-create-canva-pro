@@ -19,12 +19,18 @@ log = logging.getLogger("canva_pro_bot")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "@kashsh00")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # e.g. https://your-render-app.onrender.com/webhook
+
+# Auto-detect webhook URL on Render; fallback to WEBHOOK_URL if provided
+WEBHOOK_URL = os.getenv("WEBHOOK_URL") or (
+    os.getenv("RENDER_EXTERNAL_URL", "").rstrip("/") + "/webhook"
+)
 
 if not BOT_TOKEN:
     raise RuntimeError("Missing BOT_TOKEN in environment variables.")
-if not WEBHOOK_URL:
-    raise RuntimeError("Missing WEBHOOK_URL (e.g. https://your-app.onrender.com/webhook).")
+if not WEBHOOK_URL or WEBHOOK_URL == "/webhook":
+    raise RuntimeError(
+        "Could not determine webhook URL. Set WEBHOOK_URL or rely on RENDER_EXTERNAL_URL on Render."
+    )
 
 bot = Bot(
     token=BOT_TOKEN,
@@ -231,6 +237,7 @@ async def on_shutdown(app):
     await bot.delete_webhook()
     log.info("Bot shut down cleanly.")
 
+# aiohttp app
 app = web.Application()
 dp.include_router(router)
 SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path="/webhook")
@@ -239,4 +246,6 @@ app.on_startup.append(on_startup)
 app.on_shutdown.append(on_shutdown)
 
 if __name__ == "__main__":
+    # Render sets PORT; locally this defaults to 8080
     web.run_app(app, host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
+    
